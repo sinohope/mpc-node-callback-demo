@@ -18,6 +18,7 @@ func loadTSSNodePublicKey(path string) (*ecdsa.PublicKey, error) {
 		return nil, fmt.Errorf("failed to decode PEM block containing the public key")
 	}
 	pubInterface, err := x509.ParsePKIXPublicKey(block.Bytes)
+
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse public key: %v", err)
 	}
@@ -44,11 +45,20 @@ func loadKeypair(path string) (*ecdsa.PrivateKey, *ecdsa.PublicKey, error) {
 				break
 			}
 		}
-		keyInterface, err := x509.ParseECPrivateKey(block.Bytes)
+
+		priKey, err := x509.ParseECPrivateKey(block.Bytes)
 		if err != nil {
-			return nil, fmt.Errorf("failed to parse public key: %v", err)
+			keyInterface, err := x509.ParsePKCS8PrivateKey(block.Bytes)
+			if err != nil {
+				return nil, fmt.Errorf("failed to parse private key: %v", err)
+			}
+			priKey, ok := keyInterface.(*ecdsa.PrivateKey)
+			if !ok {
+				return nil, fmt.Errorf("not an ECDSA public key")
+			}
+			return priKey, nil
 		}
-		return keyInterface, nil
+		return priKey, nil
 	}
 
 	var err error

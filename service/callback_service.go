@@ -15,6 +15,7 @@ import (
 type CallbackServiceConfig struct {
 	Address              string
 	PrivateKeyPath       string
+	DecryptSigKeyPath    string
 	MPCNodePublicKeyPath string
 	RandomReject         bool
 }
@@ -23,6 +24,7 @@ type CallbackService struct {
 	cfg              *CallbackServiceConfig
 	PrivateKey       *ecdsa.PrivateKey
 	PublicKey        *ecdsa.PublicKey
+	DecryptSigKey	 *ecdsa.PrivateKey
 	MPCNodePublicKey *ecdsa.PublicKey
 	RandomReject     bool
 }
@@ -36,10 +38,16 @@ func NewCallBackService(cfg *CallbackServiceConfig) (*CallbackService, error) {
 	if err != nil {
 		return nil, fmt.Errorf("load callback server keypair failed, %v", err)
 	}
+
+	privateSigKey, _, err := loadKeypair(cfg.DecryptSigKeyPath)
+	if err != nil {
+		return nil, fmt.Errorf("load decrypte sig keypair failed, %v", err)
+	}
 	return &CallbackService{
 		cfg:              cfg,
 		PrivateKey:       private,
 		PublicKey:        public,
+		DecryptSigKey:	  privateSigKey,
 		MPCNodePublicKey: tssNodePublicKey,
 		RandomReject:     cfg.RandomReject,
 	}, nil
@@ -136,10 +144,44 @@ func (c *CallbackService) RawDataSignature(g *gin.Context) {
 		g.JSON(http.StatusBadRequest, gin.H{"status": "400", "error": "verify signature failed"})
 		return
 	}
-	log.Printf("receive raw data signature, callback-id: [%s] message: [%s] signature: [%s]",
+
+	decodeSig, err := Decrypt(c.DecryptSigKey, request.RequestDetail.Signature)
+	if err != nil {
+		g.JSON(http.StatusBadRequest, gin.H{"status": "501", "error": "decrypt sig error"})
+		return
+	}
+	log.Printf("receive raw data signature, callback-id: [%s] message: [%s] signature: [%s] sino-id: [%s] request-id: [%s]",
 		request.CallbackId,
-		request.RequestDetail.Message, request.RequestDetail.Signature)
-	g.JSON(http.StatusOK, gin.H{"status": "0"})
+		request.RequestDetail.Message,
+		decodeSig,
+		request.ExtraInfo.SinoId, request.ExtraInfo.RequestId)
+	// g.JSON(http.StatusOK, gin.H{"status": "0"})
+
+	response := &Response{
+		Status:    "0",
+		Signature: "",
+		Data: &ResponseData{
+			CallbackId: request.CallbackId,
+			SinoId:     request.ExtraInfo.SinoId,
+			RequestId:  request.ExtraInfo.RequestId,
+			Action:     c.randAction(request.RequestType),
+		},
+	}
+	if response.Data.Action == Wait {
+		response.Data.WaitTime = "60"
+	}
+	message, err := json.Marshal(response.Data)
+	if err != nil {
+		g.JSON(http.StatusBadRequest, gin.H{"status": "400", "error": "marshal check response failed"})
+		return
+	}
+	if signature, err := Sign(c.PrivateKey, hex.EncodeToString(message)); err != nil {
+		g.JSON(http.StatusBadRequest, gin.H{"status": "400", "error": "sign check response failed"})
+		return
+	} else {
+		response.Signature = signature
+	}
+	g.JSON(http.StatusOK, response)
 }
 
 const (
