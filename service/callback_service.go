@@ -55,7 +55,7 @@ func NewCallBackService(cfg *CallbackServiceConfig) (*CallbackService, error) {
 
 func (c *CallbackService) Start() error {
 	r := gin.Default()
-	api := r.Group("/v1")
+	api := r.Group("/")
 	api.POST("/check", c.Check)
 	api.POST("/rawdata_signature", c.RawDataSignature)
 
