@@ -41,7 +41,8 @@ func NewCallBackService(cfg *CallbackServiceConfig) (*CallbackService, error) {
 
 	privateSigKey, _, err := loadKeypair(cfg.DecryptSigKeyPath)
 	if err != nil {
-		return nil, fmt.Errorf("load decrypte sig keypair failed, %v", err)
+		// return nil, fmt.Errorf("load decrypte sig keypair failed, %v", err)
+		log.Printf("load decrypte sig keypair failed, %v", err)
 	}
 	return &CallbackService{
 		cfg:              cfg,
@@ -69,6 +70,7 @@ func (c *CallbackService) Stop() error {
 }
 
 func (c *CallbackService) Check(g *gin.Context) {
+	log.Print("check >>")
 	var err error
 	//var selected string
 	request := &Check{}
@@ -125,6 +127,7 @@ func (c *CallbackService) Check(g *gin.Context) {
 }
 
 func (c *CallbackService) RawDataSignature(g *gin.Context) {
+	log.Print("rawdata_signature >>")
 	//var selected string
 	request := &Check{}
 	if err := g.BindJSON(request); err != nil {
@@ -145,17 +148,20 @@ func (c *CallbackService) RawDataSignature(g *gin.Context) {
 		return
 	}
 
-	decodeSig, err := Decrypt(c.DecryptSigKey, request.RequestDetail.Signature)
-	if err != nil {
-		g.JSON(http.StatusBadRequest, gin.H{"status": "501", "error": "decrypt sig error"})
-		return
+	log.Printf("RequestDetail.Signature: %v", request.RequestDetail.Signature)
+	if c.DecryptSigKey != nil {
+		decodeSig, err := Decrypt(c.DecryptSigKey, request.RequestDetail.Signature)
+		if err != nil {
+			g.JSON(http.StatusBadRequest, gin.H{"status": "501", "error": "decrypt sig error"})
+			return
+		}
+		log.Print("use private key decrypt signature >>")
+		log.Printf("receive raw data signature, callback-id: [%s] message: [%s] signature: [%s] sino-id: [%s] request-id: [%s]",
+			request.CallbackId,
+			request.RequestDetail.Message,
+			decodeSig,
+			request.ExtraInfo.SinoId, request.ExtraInfo.RequestId)
 	}
-	log.Printf("receive raw data signature, callback-id: [%s] message: [%s] signature: [%s] sino-id: [%s] request-id: [%s]",
-		request.CallbackId,
-		request.RequestDetail.Message,
-		decodeSig,
-		request.ExtraInfo.SinoId, request.ExtraInfo.RequestId)
-	// g.JSON(http.StatusOK, gin.H{"status": "0"})
 
 	response := &Response{
 		Status:    "0",
