@@ -2,9 +2,11 @@ package service
 
 import (
 	"crypto/ecdsa"
+	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"math/rand"
 	"net/http"
@@ -24,7 +26,7 @@ type CallbackService struct {
 	cfg              *CallbackServiceConfig
 	PrivateKey       *ecdsa.PrivateKey
 	PublicKey        *ecdsa.PublicKey
-	DecryptSigKey	 *ecdsa.PrivateKey
+	DecryptSigKey    *ecdsa.PrivateKey
 	MPCNodePublicKey *ecdsa.PublicKey
 	RandomReject     bool
 }
@@ -48,7 +50,7 @@ func NewCallBackService(cfg *CallbackServiceConfig) (*CallbackService, error) {
 		cfg:              cfg,
 		PrivateKey:       private,
 		PublicKey:        public,
-		DecryptSigKey:	  privateSigKey,
+		DecryptSigKey:    privateSigKey,
 		MPCNodePublicKey: tssNodePublicKey,
 		RandomReject:     cfg.RandomReject,
 	}, nil
@@ -71,23 +73,30 @@ func (c *CallbackService) Stop() error {
 
 func (c *CallbackService) Check(g *gin.Context) {
 	log.Print("check >>")
-	var err error
-	//var selected string
-	request := &Check{}
-	if err := g.BindJSON(request); err != nil {
-		g.JSON(http.StatusBadRequest, gin.H{"status": "400", "error": "parse check request failed"})
+	bodyBytes, err := io.ReadAll(g.Request.Body)
+	if err != nil {
+		g.JSON(http.StatusBadRequest, gin.H{"status": "400", "error": "read body failed"})
 		return
 	}
+	log.Print("check >>")
 	signature, ok := g.Request.Header["Signature"]
 	if !ok {
 		g.JSON(http.StatusBadRequest, gin.H{"status": "400", "error": "signature not found"})
 		return
 	}
 	log.Printf("check request with signature: %v", signature)
-	if message, err := json.Marshal(request); err != nil {
-		g.JSON(http.StatusBadRequest, gin.H{"status": "400", "error": "marshal check request failed"})
+	hash := sha256.Sum256(bodyBytes)
+	signatureBytes, err := hex.DecodeString(signature[0])
+	if err != nil {
+		g.JSON(http.StatusBadRequest, gin.H{"status": "400", "error": "verify signature failed"})
 		return
-	} else if !Verify(c.MPCNodePublicKey, hex.EncodeToString(message), signature[0]) {
+	}
+	if !ecdsa.VerifyASN1(c.MPCNodePublicKey, hash[:], signatureBytes) {
+		g.JSON(http.StatusBadRequest, gin.H{"status": "400", "error": "verify signature failed"})
+		return
+	}
+	request := &Check{}
+	if err = json.Unmarshal(bodyBytes, request); err != nil {
 		g.JSON(http.StatusBadRequest, gin.H{"status": "400", "error": "verify signature failed"})
 		return
 	}
